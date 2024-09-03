@@ -7,6 +7,7 @@ import org.ldbcouncil.snb.driver.OperationHandlerRunnableContext;
 import org.ldbcouncil.snb.driver.WorkloadStreams;
 import org.ldbcouncil.snb.driver.runtime.ConcurrentErrorReporter;
 import org.ldbcouncil.snb.driver.runtime.DefaultQueues;
+import org.ldbcouncil.snb.driver.AtomicLongHolder;
 import org.ldbcouncil.snb.driver.runtime.coordination.CompletionTimeReader;
 import org.ldbcouncil.snb.driver.runtime.coordination.CompletionTimeWriter;
 import org.ldbcouncil.snb.driver.runtime.metrics.MetricsService;
@@ -24,14 +25,14 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import static java.lang.String.format;
 
-public class ThreadPoolOperationExecutor implements OperationExecutor
-{
+public class ThreadPoolOperationExecutor implements OperationExecutor {
     private final ExecutorService threadPoolExecutorService;
-    private final AtomicLong uncompletedHandlers = new AtomicLong( 0 );
-    private final AtomicBoolean shutdown = new AtomicBoolean( false );
+    private final AtomicLong uncompletedHandlers = new AtomicLong(0);
+    private final AtomicBoolean shutdown = new AtomicBoolean(false);
     private final OperationHandlerRunnableContextRetriever operationHandlerRunnableContextRetriever;
+    private final AtomicLongHolder atomicLongHolder;
 
-    public ThreadPoolOperationExecutor( int threadCount,
+    public ThreadPoolOperationExecutor(int threadCount,
             int boundedQueueSize,
             Db db,
             WorkloadStreams.WorkloadStreamDefinition streamDefinition,
@@ -41,8 +42,8 @@ public class ThreadPoolOperationExecutor implements OperationExecutor
             TimeSource timeSource,
             ConcurrentErrorReporter errorReporter,
             MetricsService metricsService,
-            ChildOperationGenerator childOperationGenerator )
-    {
+            ChildOperationGenerator childOperationGenerator, AtomicLongHolder atomicLongHolder) {
+        this.atomicLongHolder = atomicLongHolder;
         this.operationHandlerRunnableContextRetriever = new OperationHandlerRunnableContextRetriever(
                 streamDefinition,
                 db,
@@ -51,21 +52,17 @@ public class ThreadPoolOperationExecutor implements OperationExecutor
                 spinner,
                 timeSource,
                 errorReporter,
-                metricsService
-        );
-        ThreadFactory threadFactory = new ThreadFactory()
-        {
+                metricsService, atomicLongHolder);
+        ThreadFactory threadFactory = new ThreadFactory() {
             private final long factoryTimeStampId = System.currentTimeMillis();
             int count = 0;
 
             @Override
-            public Thread newThread( Runnable runnable )
-            {
+            public Thread newThread(Runnable runnable) {
                 return new Thread(
                         runnable,
                         ThreadPoolOperationExecutor.class.getSimpleName() + "-id(" + factoryTimeStampId + ")" +
-                        "-thread(" + count++ + ")"
-                );
+                                "-thread(" + count++ + ")");
             }
         };
         this.threadPoolExecutorService = ThreadPoolExecutorWithAfterExecute.newFixedThreadPool(
@@ -75,93 +72,76 @@ public class ThreadPoolOperationExecutor implements OperationExecutor
                 boundedQueueSize,
                 childOperationGenerator,
                 operationHandlerRunnableContextRetriever,
-                errorReporter
-        );
+                errorReporter);
     }
 
     @Override
-    public final void execute( Operation operation ) throws OperationExecutorException
-    {
+    public final void execute(Operation operation) throws OperationExecutorException {
         uncompletedHandlers.incrementAndGet();
-        try
-        {
-            OperationHandlerRunnableContext operationHandlerRunnableContext =
-                    operationHandlerRunnableContextRetriever.getInitializedHandlerFor( operation );
-            threadPoolExecutorService.execute( operationHandlerRunnableContext );
-        }
-        catch ( Throwable e )
-        {
+        try {
+            OperationHandlerRunnableContext operationHandlerRunnableContext = operationHandlerRunnableContextRetriever
+                    .getInitializedHandlerFor(operation);
+            threadPoolExecutorService.execute(operationHandlerRunnableContext);
+        } catch (Throwable e) {
             throw new OperationExecutorException(
-                    format( "Error retrieving handler\nOperation: %s\n%s",
+                    format("Error retrieving handler\nOperation: %s\n%s",
                             operation,
-                            ConcurrentErrorReporter.stackTraceToString( e ) ),
-                    e );
+                            ConcurrentErrorReporter.stackTraceToString(e)),
+                    e);
         }
     }
 
     @Override
-    synchronized public final void shutdown( long waitAsMilli ) throws OperationExecutorException
-    {
-        if ( shutdown.get() )
-        {
-            throw new OperationExecutorException( "Executor has already been shutdown" );
+    synchronized public final void shutdown(long waitAsMilli) throws OperationExecutorException {
+        if (shutdown.get()) {
+            throw new OperationExecutorException("Executor has already been shutdown");
         }
-        try
-        {
+        try {
             threadPoolExecutorService.shutdown();
-            boolean allHandlersCompleted =
-                    threadPoolExecutorService.awaitTermination( waitAsMilli, TimeUnit.MILLISECONDS );
-            if ( !allHandlersCompleted )
-            {
+            boolean allHandlersCompleted = threadPoolExecutorService.awaitTermination(waitAsMilli,
+                    TimeUnit.MILLISECONDS);
+            if (!allHandlersCompleted) {
                 List<Runnable> stillRunningThreads = threadPoolExecutorService.shutdownNow();
-                if ( !stillRunningThreads.isEmpty() )
-                {
+                if (!stillRunningThreads.isEmpty()) {
                     String errMsg = format(
                             "%s shutdown before all handlers could complete\n%s handlers were queued for execution " +
-                            "but not yet started\n%s handlers were mid-execution",
+                                    "but not yet started\n%s handlers were mid-execution",
                             getClass().getSimpleName(),
                             stillRunningThreads.size(),
-                            uncompletedHandlers.get() - stillRunningThreads.size() );
-                    throw new OperationExecutorException( errMsg );
+                            uncompletedHandlers.get() - stillRunningThreads.size());
+                    throw new OperationExecutorException(errMsg);
                 }
             }
-        }
-        catch ( Throwable e )
-        {
-            throw new OperationExecutorException( "Error encountered while trying to shutdown", e );
-        }
-        finally
-        {
-            shutdown.set( true );
+        } catch (Throwable e) {
+            throw new OperationExecutorException("Error encountered while trying to shutdown", e);
+        } finally {
+            shutdown.set(true);
         }
     }
 
     @Override
-    public long uncompletedOperationHandlerCount()
-    {
+    public long uncompletedOperationHandlerCount() {
         return uncompletedHandlers.get();
     }
 
-    private static class ThreadPoolExecutorWithAfterExecute extends ThreadPoolExecutor
-    {
+    private static class ThreadPoolExecutorWithAfterExecute extends ThreadPoolExecutor {
         private final ChildOperationGenerator childOperationGenerator;
         private final ChildOperationExecutor childOperationExecutor;
         private final OperationHandlerRunnableContextRetriever operationHandlerRunnableContextRetriever;
         private final ConcurrentErrorReporter errorReporter;
 
-        static ThreadPoolExecutorWithAfterExecute newFixedThreadPool( int threadCount,
+        static ThreadPoolExecutorWithAfterExecute newFixedThreadPool(int threadCount,
                 ThreadFactory threadFactory,
                 AtomicLong uncompletedHandlers,
                 int boundedQueueSize,
                 ChildOperationGenerator childOperationGenerator,
                 OperationHandlerRunnableContextRetriever operationHandlerRunnableContextInitializer,
-                ConcurrentErrorReporter errorReporter )
-        {
+                ConcurrentErrorReporter errorReporter) {
             int corePoolSize = threadCount;
             int maximumPoolSize = threadCount;
             long keepAliveTime = 0;
             TimeUnit unit = TimeUnit.MILLISECONDS;
-            BlockingQueue<Runnable> workQueue = DefaultQueues.newAlwaysBlockingBounded( boundedQueueSize );
+            BlockingQueue<Runnable> workQueue = DefaultQueues.newAlwaysBlockingBounded(boundedQueueSize);
             return new ThreadPoolExecutorWithAfterExecute(
                     corePoolSize,
                     maximumPoolSize,
@@ -172,13 +152,12 @@ public class ThreadPoolOperationExecutor implements OperationExecutor
                     uncompletedHandlers,
                     childOperationGenerator,
                     operationHandlerRunnableContextInitializer,
-                    errorReporter
-            );
+                    errorReporter);
         }
 
         private final AtomicLong uncompletedHandlers;
 
-        private ThreadPoolExecutorWithAfterExecute( int corePoolSize,
+        private ThreadPoolExecutorWithAfterExecute(int corePoolSize,
                 int maximumPoolSize,
                 long keepAliveTime,
                 TimeUnit unit,
@@ -187,9 +166,8 @@ public class ThreadPoolOperationExecutor implements OperationExecutor
                 AtomicLong uncompletedHandlers,
                 ChildOperationGenerator childOperationGenerator,
                 OperationHandlerRunnableContextRetriever operationHandlerRunnableContextRetriever,
-                ConcurrentErrorReporter errorReporter )
-        {
-            super( corePoolSize, maximumPoolSize, keepAliveTime, unit, workQueue, threadFactory );
+                ConcurrentErrorReporter errorReporter) {
+            super(corePoolSize, maximumPoolSize, keepAliveTime, unit, workQueue, threadFactory);
             this.childOperationExecutor = new ChildOperationExecutor();
             this.uncompletedHandlers = uncompletedHandlers;
             this.childOperationGenerator = childOperationGenerator;
@@ -199,29 +177,21 @@ public class ThreadPoolOperationExecutor implements OperationExecutor
 
         // Note, this occurs in same worker thread as beforeExecute() and run()
         @Override
-        protected void afterExecute( Runnable runnable, Throwable throwable )
-        {
-            super.afterExecute( runnable, throwable );
-            OperationHandlerRunnableContext operationHandlerRunnableContext =
-                    (OperationHandlerRunnableContext) runnable;
-            try
-            {
+        protected void afterExecute(Runnable runnable, Throwable throwable) {
+            super.afterExecute(runnable, throwable);
+            OperationHandlerRunnableContext operationHandlerRunnableContext = (OperationHandlerRunnableContext) runnable;
+            try {
                 childOperationExecutor.execute(
                         childOperationGenerator,
                         operationHandlerRunnableContext.operation(),
                         operationHandlerRunnableContext.resultReporter().result(),
                         operationHandlerRunnableContext.resultReporter().actualStartTimeAsMilli(),
                         operationHandlerRunnableContext.resultReporter().runDurationAsNano(),
-                        operationHandlerRunnableContextRetriever
-                );
-            }
-            catch ( Throwable e )
-            {
-                errorReporter.reportError( this,
-                        format( "Error retrieving handler\n%s", ConcurrentErrorReporter.stackTraceToString( e ) ) );
-            }
-            finally
-            {
+                        operationHandlerRunnableContextRetriever);
+            } catch (Throwable e) {
+                errorReporter.reportError(this,
+                        format("Error retrieving handler\n%s", ConcurrentErrorReporter.stackTraceToString(e)));
+            } finally {
                 uncompletedHandlers.decrementAndGet();
                 operationHandlerRunnableContext.cleanup();
             }

@@ -6,6 +6,7 @@ import org.ldbcouncil.snb.driver.Operation;
 import org.ldbcouncil.snb.driver.OperationHandlerRunnableContext;
 import org.ldbcouncil.snb.driver.WorkloadStreams;
 import org.ldbcouncil.snb.driver.runtime.ConcurrentErrorReporter;
+import org.ldbcouncil.snb.driver.AtomicLongHolder;
 import org.ldbcouncil.snb.driver.runtime.coordination.CompletionTimeReader;
 import org.ldbcouncil.snb.driver.runtime.coordination.CompletionTimeWriter;
 import org.ldbcouncil.snb.driver.runtime.metrics.MetricsService;
@@ -16,14 +17,14 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import static java.lang.String.format;
 
-public class SameThreadOperationExecutor implements OperationExecutor
-{
-    private final AtomicLong uncompletedHandlers = new AtomicLong( 0 );
+public class SameThreadOperationExecutor implements OperationExecutor {
+    private final AtomicLong uncompletedHandlers = new AtomicLong(0);
     private final OperationHandlerRunnableContextRetriever operationHandlerRunnableContextRetriever;
     private final ChildOperationGenerator childOperationGenerator;
     private final ChildOperationExecutor childOperationExecutor;
+    private final AtomicLongHolder atomicLongHolder;
 
-    public SameThreadOperationExecutor( Db db,
+    public SameThreadOperationExecutor(Db db,
             WorkloadStreams.WorkloadStreamDefinition streamDefinition,
             CompletionTimeWriter completionTimeWriter,
             CompletionTimeReader completionTimeReader,
@@ -31,8 +32,8 @@ public class SameThreadOperationExecutor implements OperationExecutor
             TimeSource timeSource,
             ConcurrentErrorReporter errorReporter,
             MetricsService metricsService,
-            ChildOperationGenerator childOperationGenerator )
-    {
+            ChildOperationGenerator childOperationGenerator, AtomicLongHolder atomicLongHolder) {
+        this.atomicLongHolder = atomicLongHolder;
         this.childOperationExecutor = new ChildOperationExecutor();
         this.childOperationGenerator = childOperationGenerator;
         this.operationHandlerRunnableContextRetriever = new OperationHandlerRunnableContextRetriever(
@@ -43,18 +44,16 @@ public class SameThreadOperationExecutor implements OperationExecutor
                 spinner,
                 timeSource,
                 errorReporter,
-                metricsService );
+                metricsService, atomicLongHolder);
     }
 
     @Override
-    public final void execute( Operation operation ) throws OperationExecutorException
-    {
+    public final void execute(Operation operation) throws OperationExecutorException {
         uncompletedHandlers.incrementAndGet();
         OperationHandlerRunnableContext operationHandlerRunnableContext = null;
-        try
-        {
-            operationHandlerRunnableContext =
-                    operationHandlerRunnableContextRetriever.getInitializedHandlerFor( operation );
+        try {
+            operationHandlerRunnableContext = operationHandlerRunnableContextRetriever
+                    .getInitializedHandlerFor(operation);
             operationHandlerRunnableContext.run();
             childOperationExecutor.execute(
                     childOperationGenerator,
@@ -62,35 +61,27 @@ public class SameThreadOperationExecutor implements OperationExecutor
                     operationHandlerRunnableContext.resultReporter().result(),
                     operationHandlerRunnableContext.resultReporter().actualStartTimeAsMilli(),
                     operationHandlerRunnableContext.resultReporter().runDurationAsNano(),
-                    operationHandlerRunnableContextRetriever
-            );
-        }
-        catch ( Throwable e )
-        {
+                    operationHandlerRunnableContextRetriever);
+        } catch (Throwable e) {
             throw new OperationExecutorException(
-                    format( "Error retrieving or executing handler\n" +
+                    format("Error retrieving or executing handler\n" +
                             "Operation: %s\n" +
                             "Handler Context:%s",
                             operation,
-                            operationHandlerRunnableContext ),
-                    e
-            );
-        }
-        finally
-        {
+                            operationHandlerRunnableContext),
+                    e);
+        } finally {
             uncompletedHandlers.decrementAndGet();
             operationHandlerRunnableContext.cleanup();
         }
     }
 
     @Override
-    synchronized public final void shutdown( long waitAsMilli ) throws OperationExecutorException
-    {
+    synchronized public final void shutdown(long waitAsMilli) throws OperationExecutorException {
     }
 
     @Override
-    public long uncompletedOperationHandlerCount()
-    {
+    public long uncompletedOperationHandlerCount() {
         return uncompletedHandlers.get();
     }
 }

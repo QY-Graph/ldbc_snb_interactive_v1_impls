@@ -6,6 +6,7 @@ import org.ldbcouncil.snb.driver.Operation;
 import org.ldbcouncil.snb.driver.OperationHandlerRunnableContext;
 import org.ldbcouncil.snb.driver.WorkloadStreams;
 import org.ldbcouncil.snb.driver.runtime.ConcurrentErrorReporter;
+import org.ldbcouncil.snb.driver.AtomicLongHolder;
 import org.ldbcouncil.snb.driver.runtime.coordination.CompletionTimeException;
 import org.ldbcouncil.snb.driver.runtime.coordination.CompletionTimeReader;
 import org.ldbcouncil.snb.driver.runtime.coordination.CompletionTimeWriter;
@@ -20,8 +21,7 @@ import java.util.Set;
 import static java.lang.String.format;
 
 // TODO test
-class OperationHandlerRunnableContextRetriever
-{
+class OperationHandlerRunnableContextRetriever {
     private static final CompletionTimeWriter DUMMY_COMPLETION_TIME_WRITER = new DummyCompletionTimeWriter();
     private final Db db;
     private final CompletionTimeWriter completionTimeWriter;
@@ -32,6 +32,7 @@ class OperationHandlerRunnableContextRetriever
     private final Set<Class<? extends Operation>> dependencyOperationTypes;
     private final Set<Class<? extends Operation>> dependentOperationTypes;
     private final CtDependencyCheck ctDependencyCheck;
+    private final AtomicLongHolder atomicLongHolder;
 
     OperationHandlerRunnableContextRetriever(
             WorkloadStreams.WorkloadStreamDefinition streamDefinition,
@@ -41,8 +42,8 @@ class OperationHandlerRunnableContextRetriever
             Spinner spinner,
             TimeSource timeSource,
             ConcurrentErrorReporter errorReporter,
-            MetricsService metricsService )
-    {
+            MetricsService metricsService, AtomicLongHolder atomicLongHolder) {
+        this.atomicLongHolder = atomicLongHolder;
         this.db = db;
         this.completionTimeWriter = completionTimeWriter;
         this.spinner = spinner;
@@ -51,51 +52,39 @@ class OperationHandlerRunnableContextRetriever
         this.metricsService = metricsService;
         this.dependentOperationTypes = streamDefinition.dependentOperationTypes();
         this.dependencyOperationTypes = streamDefinition.dependencyOperationTypes();
-        this.ctDependencyCheck = new CtDependencyCheck( completionTimeReader, errorReporter );
+        this.ctDependencyCheck = new CtDependencyCheck(completionTimeReader, errorReporter);
     }
 
-    OperationHandlerRunnableContext getInitializedHandlerFor( Operation operation )
-            throws OperationExecutorException, CompletionTimeException, DbException
-    {
+    OperationHandlerRunnableContext getInitializedHandlerFor(Operation operation)
+            throws OperationExecutorException, CompletionTimeException, DbException {
         OperationHandlerRunnableContext operationHandlerRunnableContext;
-        try
-        {
-            operationHandlerRunnableContext = db.getOperationHandlerRunnableContext( operation );
-        }
-        catch ( Exception e )
-        {
+        try {
+            operationHandlerRunnableContext = db.getOperationHandlerRunnableContext(operation);
+        } catch (Exception e) {
             throw new OperationExecutorException(
-                    format( "Error while retrieving handler for operation\nOperation: %s", operation ), e );
+                    format("Error while retrieving handler for operation\nOperation: %s", operation), e);
         }
         CompletionTimeWriter completionTimeWriterForHandler;
         // TODO this should really be a Set<Integer> --> even PrimitiveIntSet
-        if ( dependencyOperationTypes.contains( operation.getClass() ) )
-        {
+        if (dependencyOperationTypes.contains(operation.getClass())) {
             completionTimeWriterForHandler = completionTimeWriter;
-        }
-        else
-        {
+        } else {
             completionTimeWriterForHandler = DUMMY_COMPLETION_TIME_WRITER;
         }
-        try
-        {
+        try {
             operationHandlerRunnableContext.init(
                     timeSource,
                     spinner,
                     operation,
                     completionTimeWriterForHandler,
                     errorReporter,
-                    metricsService
-            );
-        }
-        catch ( Exception e )
-        {
-            throw new OperationExecutorException( format( "Error initializing handler for: %s", operation ), e );
+                    metricsService, atomicLongHolder);
+        } catch (Exception e) {
+            throw new OperationExecutorException(format("Error initializing handler for: %s", operation), e);
         }
         // TODO this should really be a Set<Integer> --> even PrimitiveIntSet
-        if ( dependentOperationTypes.contains( operation.getClass() ) )
-        {
-            operationHandlerRunnableContext.setBeforeExecuteCheck( ctDependencyCheck );
+        if (dependentOperationTypes.contains(operation.getClass())) {
+            operationHandlerRunnableContext.setBeforeExecuteCheck(ctDependencyCheck);
         }
         return operationHandlerRunnableContext;
     }
