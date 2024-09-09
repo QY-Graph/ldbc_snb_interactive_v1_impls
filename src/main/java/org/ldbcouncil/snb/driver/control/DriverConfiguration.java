@@ -1,4 +1,5 @@
 package org.ldbcouncil.snb.driver.control;
+
 /**
  * Interface defining parameters required to run the driver
  */
@@ -6,8 +7,7 @@ package org.ldbcouncil.snb.driver.control;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
-public interface DriverConfiguration
-{
+public interface DriverConfiguration {
     // General
     String mode();
 
@@ -45,6 +45,8 @@ public interface DriverConfiguration
 
     boolean ignoreScheduledStartTimes();
 
+    long splitFile();
+
     long warmupCount();
 
     long skipCount();
@@ -53,12 +55,12 @@ public interface DriverConfiguration
 
     String toPropertiesString() throws DriverConfigurationException;
 
-    Map<String,String> asMap();
+    Map<String, String> asMap();
 
-    DriverConfiguration applyArgs( DriverConfiguration newConfiguration ) throws DriverConfigurationException;
+    DriverConfiguration applyArgs(DriverConfiguration newConfiguration) throws DriverConfigurationException;
 
-    DriverConfiguration applyArg( String argument, String newValue ) throws DriverConfigurationException;
+    DriverConfiguration applyArg(String argument, String newValue) throws DriverConfigurationException;
 
-    DriverConfiguration applyArgs( Map<String,String> newMap ) throws DriverConfigurationException;
+    DriverConfiguration applyArgs(Map<String, String> newMap) throws DriverConfigurationException;
 
 }
