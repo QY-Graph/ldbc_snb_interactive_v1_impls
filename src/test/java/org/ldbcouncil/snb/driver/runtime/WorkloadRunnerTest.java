@@ -816,7 +816,7 @@ public class WorkloadRunnerTest {
                         Iterator<Operation> timeMappedOperations = gf.timeOffsetAndCompress(operations,
                                         controlService.workloadStartTimeAsMilli(), 1.0);
                         WorkloadStreams workloadStreams = new WorkloadStreams();
-                        workloadStreams.setAsynchronousStream(
+                        workloadStreams.addAsynchronousStream(
                                         new HashSet<Class<? extends Operation>>(),
                                         new HashSet<Class<? extends Operation>>(),
                                         Collections.<Operation>emptyIterator(),

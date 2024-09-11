@@ -16,13 +16,13 @@ public class DummyWorkloadFactory implements WorkloadFactory {
     private final long maxExpectedInterleaveAsMilli;
 
     public DummyWorkloadFactory(Iterator<WorkloadStreams> streams,
-                                long maxExpectedInterleaveAsMilli) {
+            long maxExpectedInterleaveAsMilli) {
         this(streams, null, maxExpectedInterleaveAsMilli);
     }
 
     public DummyWorkloadFactory(Iterator<WorkloadStreams> streams,
-                                Iterator<Operation> alternativeLastOperations,
-                                long maxExpectedInterleaveAsMilli) {
+            Iterator<Operation> alternativeLastOperations,
+            long maxExpectedInterleaveAsMilli) {
         this.streams = streams;
         this.alternativeLastOperations = alternativeLastOperations;
         this.maxExpectedInterleaveAsMilli = maxExpectedInterleaveAsMilli;
@@ -35,16 +35,16 @@ public class DummyWorkloadFactory implements WorkloadFactory {
             workloadStreams = streams.next();
         } else {
             workloadStreams = streams.next();
-            List<Operation> asynchronousNonDependencyOperationsToReturn = Lists.newArrayList(workloadStreams.asynchronousStream().nonDependencyOperations());
+            List<Operation> asynchronousNonDependencyOperationsToReturn = Lists
+                    .newArrayList(workloadStreams.asynchronousStream().get(0).nonDependencyOperations());
             asynchronousNonDependencyOperationsToReturn.remove(asynchronousNonDependencyOperationsToReturn.size() - 1);
             asynchronousNonDependencyOperationsToReturn.add(alternativeLastOperations.next());
-            workloadStreams.setAsynchronousStream(
-                    workloadStreams.asynchronousStream().dependentOperationTypes(),
-                    workloadStreams.asynchronousStream().dependencyOperationTypes(),
-                    workloadStreams.asynchronousStream().dependencyOperations(),
+            workloadStreams.addAsynchronousStream(
+                    workloadStreams.asynchronousStream().get(0).dependentOperationTypes(),
+                    workloadStreams.asynchronousStream().get(0).dependencyOperationTypes(),
+                    workloadStreams.asynchronousStream().get(0).dependencyOperations(),
                     asynchronousNonDependencyOperationsToReturn.iterator(),
-                    workloadStreams.asynchronousStream().childOperationGenerator()
-            );
+                    workloadStreams.asynchronousStream().get(0).childOperationGenerator());
         }
         return new DummyWorkload(workloadStreams, maxExpectedInterleaveAsMilli);
     }
